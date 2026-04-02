@@ -13,11 +13,12 @@ export default function Dashboard() {
 
   async function load() {
     setLoading(true)
-    const [incRes, billPayRes, extRes, billRes] = await Promise.all([
+    const [incRes, billPayRes, extRes, billMonthRes, fixedBillRes] = await Promise.all([
       supabase.from('income_entries').select('*, people(name), income_sources(name)').eq('month_year', month),
       supabase.from('bill_month_entries').select('*, fixed_bills(name, due_day), people(name)').eq('month_year', month).not('paid_by', 'is', null),
       supabase.from('extra_expenses').select('*, people(name)').eq('month_year', month),
-      supabase.from('bill_month_entries').select('amount').eq('month_year', month),
+      supabase.from('bill_month_entries').select('bill_id, amount').eq('month_year', month),
+      supabase.from('fixed_bills').select('id, estimated_amount').eq('active', true),
     ])
 
     const incomes = (incRes.data || []).map(i => ({
@@ -34,7 +35,14 @@ export default function Dashboard() {
       person_name: e.people?.name,
     }))
 
-    setData({ incomes, billPayments, extras, billMonths: billRes.data || [] })
+    // Usa valor mensal salvo ou estimado como fallback
+    const billMonthMap = {}
+    for (const bm of (billMonthRes.data || [])) billMonthMap[bm.bill_id] = bm.amount
+    const billMonths = (fixedBillRes.data || []).map(fb => ({
+      amount: billMonthMap[fb.id] ?? fb.estimated_amount ?? 0,
+    }))
+
+    setData({ incomes, billPayments, extras, billMonths })
     setLoading(false)
   }
 
