@@ -12,6 +12,7 @@ export default function ContasFixas() {
   const [newBill, setNewBill] = useState({ name: '', due_day: '', estimated_amount: '' })
   const [localValues, setLocalValues] = useState({}) // {billId: {amount, paid_by, paid_date}}
   const [saving, setSaving] = useState({})
+  const [editingBill, setEditingBill] = useState(null) // {id, name, due_day, estimated_amount}
   const [msg, setMsg] = useState('')
 
   useEffect(() => { load() }, [month])
@@ -52,6 +53,18 @@ export default function ContasFixas() {
     if (error) return setMsg('Erro: ' + error.message)
     setNewBill({ name: '', due_day: '', estimated_amount: '' })
     setMsg('Conta adicionada!')
+    load()
+  }
+
+  async function saveBillEdit(e) {
+    e.preventDefault()
+    if (!editingBill.name.trim() || !editingBill.due_day) return
+    await supabase.from('fixed_bills').update({
+      name: editingBill.name.trim(),
+      due_day: parseInt(editingBill.due_day),
+      estimated_amount: editingBill.estimated_amount ? parseFloat(editingBill.estimated_amount) : null,
+    }).eq('id', editingBill.id)
+    setEditingBill(null)
     load()
   }
 
@@ -130,14 +143,34 @@ export default function ContasFixas() {
             const saved = !!bm
             return (
               <Card key={bill.id} style={{ paddingBottom: 12 }}>
-                <div style={styles.billHeader}>
-                  <div>
-                    <span style={styles.billName}>{bill.name}</span>
-                    <span style={styles.billDay}> · vence dia {bill.due_day}</span>
-                    {saved && <span style={styles.savedBadge}>✓ salvo</span>}
+                {editingBill?.id === bill.id ? (
+                  <form onSubmit={saveBillEdit} style={styles.editBillForm}>
+                    <input style={styles.input} value={editingBill.name} autoFocus
+                      onChange={e => setEditingBill(b => ({ ...b, name: e.target.value }))} placeholder="Nome" />
+                    <div style={styles.twoCol}>
+                      <input style={styles.input} type="number" min="1" max="31" placeholder="Dia venc."
+                        value={editingBill.due_day} onChange={e => setEditingBill(b => ({ ...b, due_day: e.target.value }))} />
+                      <input style={styles.input} type="number" step="0.01" placeholder="Valor estimado"
+                        value={editingBill.estimated_amount} onChange={e => setEditingBill(b => ({ ...b, estimated_amount: e.target.value }))} />
+                    </div>
+                    <div style={styles.editBillActions}>
+                      <button style={styles.saveEditBtn} type="submit">Salvar</button>
+                      <button type="button" onClick={() => setEditingBill(null)} style={styles.cancelEditBtn}>Cancelar</button>
+                    </div>
+                  </form>
+                ) : (
+                  <div style={styles.billHeader}>
+                    <div>
+                      <span style={styles.billName}>{bill.name}</span>
+                      <span style={styles.billDay}> · vence dia {bill.due_day}</span>
+                      {saved && <span style={styles.savedBadge}>✓ salvo</span>}
+                    </div>
+                    <div style={styles.billActions}>
+                      <button onClick={() => setEditingBill({ id: bill.id, name: bill.name, due_day: bill.due_day, estimated_amount: bill.estimated_amount || '' })} style={styles.editBillBtn}>Editar</button>
+                      <button onClick={() => deactivateBill(bill.id)} style={styles.deleteBtn}>Desativar</button>
+                    </div>
                   </div>
-                  <button onClick={() => deactivateBill(bill.id)} style={styles.deleteBtn}>Desativar</button>
-                </div>
+                )}
 
                 <div style={styles.twoCol}>
                   <div style={styles.field}>
@@ -209,6 +242,12 @@ const styles = {
   input: { padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none', width: '100%' },
   btn: { background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontWeight: 600, fontSize: 14, width: '100%' },
   billHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  billActions: { display: 'flex', gap: 6 },
+  editBillBtn: { background: '#eff6ff', color: '#1a56db', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 },
+  editBillForm: { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 },
+  editBillActions: { display: 'flex', gap: 8 },
+  saveEditBtn: { background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, flex: 1 },
+  cancelEditBtn: { background: '#e2e8f0', color: '#374151', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 13, flex: 1 },
   billName: { fontWeight: 700, fontSize: 15 },
   billDay: { color: '#64748b', fontSize: 13 },
   savedBadge: { marginLeft: 8, fontSize: 11, color: '#16a34a', fontWeight: 600 },
