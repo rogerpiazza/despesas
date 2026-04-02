@@ -15,7 +15,7 @@ export default function Sugestao() {
   async function load() {
     setLoading(true)
 
-    const [incRes, billRes] = await Promise.all([
+    const [incRes, billMonthRes, fixedBillRes] = await Promise.all([
       supabase
         .from('income_entries')
         .select('*, income_sources(name), people(name)')
@@ -25,6 +25,11 @@ export default function Sugestao() {
         .from('bill_month_entries')
         .select('*, fixed_bills(name, due_day)')
         .eq('month_year', month),
+      supabase
+        .from('fixed_bills')
+        .select('*')
+        .eq('active', true)
+        .order('due_day'),
     ])
 
     const incomes = (incRes.data || []).map(i => ({
@@ -33,11 +38,22 @@ export default function Sugestao() {
       income_source_name: i.income_sources?.name,
     }))
 
-    const bills = (billRes.data || []).map(b => ({
-      ...b,
-      name: b.fixed_bills?.name,
-      due_day: b.fixed_bills?.due_day,
-    })).filter(b => b.amount > 0)
+    // Usa valor do mês se salvo, senão usa o estimado da conta fixa
+    const billMonthMap = {}
+    for (const bm of (billMonthRes.data || [])) {
+      billMonthMap[bm.bill_id] = bm
+    }
+
+    const bills = (fixedBillRes.data || []).map(fb => {
+      const bm = billMonthMap[fb.id]
+      return {
+        id: bm?.id || fb.id,
+        bill_id: fb.id,
+        name: fb.name,
+        due_day: fb.due_day,
+        amount: bm?.amount ?? fb.estimated_amount ?? 0,
+      }
+    }).filter(b => b.amount > 0)
 
     const sugg = calculateSuggestions(incomes, bills)
     setSuggestions(sugg)

@@ -10,6 +10,8 @@ export default function ContasFixas() {
   const [billMonths, setBillMonths] = useState([])
   const [people, setPeople] = useState([])
   const [newBill, setNewBill] = useState({ name: '', due_day: '', estimated_amount: '' })
+  const [localValues, setLocalValues] = useState({}) // {billId: {amount, paid_by, paid_date}}
+  const [saving, setSaving] = useState({})
   const [msg, setMsg] = useState('')
 
   useEffect(() => { load() }, [month])
@@ -20,9 +22,23 @@ export default function ContasFixas() {
       supabase.from('bill_month_entries').select('*, people(name)').eq('month_year', month),
       supabase.from('people').select('*').order('name'),
     ])
-    setBills(bRes.data || [])
-    setBillMonths(bmRes.data || [])
+    const billsData = bRes.data || []
+    const billMonthsData = bmRes.data || []
+    setBills(billsData)
+    setBillMonths(billMonthsData)
     setPeople(pRes.data || [])
+
+    // Inicializa valores locais com dados do banco ou estimados
+    const lv = {}
+    for (const bill of billsData) {
+      const bm = billMonthsData.find(b => b.bill_id === bill.id)
+      lv[bill.id] = {
+        amount: bm ? String(bm.amount) : (bill.estimated_amount ? String(bill.estimated_amount) : ''),
+        paid_by: bm?.paid_by || '',
+        paid_date: bm?.paid_date || '',
+      }
+    }
+    setLocalValues(lv)
   }
 
   async function addBill(e) {
@@ -45,23 +61,30 @@ export default function ContasFixas() {
     load()
   }
 
-  async function saveBillMonth(bill, field, value) {
+  async function saveBill(bill) {
+    setSaving(s => ({ ...s, [bill.id]: true }))
+    const lv = localValues[bill.id] || {}
     const existing = billMonths.find(bm => bm.bill_id === bill.id)
+    const payload = {
+      amount: parseFloat(lv.amount) || 0,
+      paid_by: lv.paid_by || null,
+      paid_date: lv.paid_date || null,
+    }
     if (existing) {
-      await supabase.from('bill_month_entries').update({ [field]: value }).eq('id', existing.id)
+      await supabase.from('bill_month_entries').update(payload).eq('id', existing.id)
     } else {
       await supabase.from('bill_month_entries').insert({
         bill_id: bill.id,
         month_year: month,
-        amount: bill.estimated_amount || 0,
-        [field]: value,
+        ...payload,
       })
     }
+    setSaving(s => ({ ...s, [bill.id]: false }))
     load()
   }
 
-  function getBillMonth(billId) {
-    return billMonths.find(bm => bm.bill_id === billId)
+  function setLocal(billId, field, value) {
+    setLocalValues(lv => ({ ...lv, [billId]: { ...lv[billId], [field]: value } }))
   }
 
   const total = billMonths.reduce((s, b) => s + Number(b.amount), 0)
@@ -102,13 +125,16 @@ export default function ContasFixas() {
       ) : (
         <>
           {bills.map(bill => {
-            const bm = getBillMonth(bill.id)
+            const lv = localValues[bill.id] || {}
+            const bm = billMonths.find(b => b.bill_id === bill.id)
+            const saved = !!bm
             return (
               <Card key={bill.id} style={{ paddingBottom: 12 }}>
                 <div style={styles.billHeader}>
                   <div>
                     <span style={styles.billName}>{bill.name}</span>
                     <span style={styles.billDay}> · vence dia {bill.due_day}</span>
+                    {saved && <span style={styles.savedBadge}>✓ salvo</span>}
                   </div>
                   <button onClick={() => deactivateBill(bill.id)} style={styles.deleteBtn}>Desativar</button>
                 </div>
@@ -120,17 +146,16 @@ export default function ContasFixas() {
                       style={styles.input}
                       type="number"
                       step="0.01"
-                      defaultValue={bm?.amount ?? bill.estimated_amount ?? ''}
-                      placeholder={bill.estimated_amount ? String(bill.estimated_amount) : '0,00'}
-                      onBlur={e => saveBillMonth(bill, 'amount', parseFloat(e.target.value) || 0)}
+                      value={lv.amount ?? ''}
+                      onChange={e => setLocal(bill.id, 'amount', e.target.value)}
                     />
                   </div>
                   <div style={styles.field}>
                     <label style={styles.label}>Quem pagou</label>
                     <select
                       style={styles.input}
-                      value={bm?.paid_by || ''}
-                      onChange={e => saveBillMonth(bill, 'paid_by', e.target.value || null)}
+                      value={lv.paid_by || ''}
+                      onChange={e => setLocal(bill.id, 'paid_by', e.target.value)}
                     >
                       <option value="">— não pago —</option>
                       {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -138,24 +163,32 @@ export default function ContasFixas() {
                   </div>
                 </div>
 
-                {bm?.paid_by && (
-                  <div style={styles.field}>
+                {lv.paid_by && (
+                  <div style={{ ...styles.field, marginTop: 8 }}>
                     <label style={styles.label}>Data do pagamento</label>
                     <input
                       style={{ ...styles.input, maxWidth: 180 }}
                       type="date"
-                      defaultValue={bm?.paid_date || ''}
-                      onBlur={e => saveBillMonth(bill, 'paid_date', e.target.value || null)}
+                      value={lv.paid_date || ''}
+                      onChange={e => setLocal(bill.id, 'paid_date', e.target.value)}
                     />
                   </div>
                 )}
+
+                <button
+                  style={{ ...styles.btn, marginTop: 12, background: saved ? '#16a34a' : '#1a56db' }}
+                  onClick={() => saveBill(bill)}
+                  disabled={saving[bill.id]}
+                >
+                  {saving[bill.id] ? 'Salvando...' : saved ? '✓ Atualizar' : 'Salvar'}
+                </button>
               </Card>
             )
           })}
 
           <Card style={{ background: '#eff6ff' }}>
             <div style={styles.totalRow}>
-              <span style={{ fontWeight: 700 }}>Total Contas Fixas</span>
+              <span style={{ fontWeight: 700 }}>Total Contas Fixas (salvas)</span>
               <span style={{ fontWeight: 700, color: '#1a56db', fontSize: 18 }}>{formatCurrency(total)}</span>
             </div>
           </Card>
@@ -174,10 +207,11 @@ const styles = {
   field: { display: 'flex', flexDirection: 'column', gap: 4 },
   label: { fontSize: 12, color: '#64748b', fontWeight: 500 },
   input: { padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none', width: '100%' },
-  btn: { background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontWeight: 600, fontSize: 14, marginTop: 4 },
+  btn: { background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontWeight: 600, fontSize: 14, width: '100%' },
   billHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   billName: { fontWeight: 700, fontSize: 15 },
   billDay: { color: '#64748b', fontSize: 13 },
+  savedBadge: { marginLeft: 8, fontSize: 11, color: '#16a34a', fontWeight: 600 },
   deleteBtn: { background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 },
   totalRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
 }
