@@ -58,14 +58,14 @@ export default function Sugestao() {
     const sugg = calculateSuggestions(incomes, bills)
     setSuggestions(sugg)
 
-    // Agrupa por pessoa
+    // Agrupa por pessoa (usa s.amount que pode ser parcial em splits)
     const grouped = {}
     for (const s of sugg) {
       if (!grouped[s.payer_id]) {
         grouped[s.payer_id] = { name: s.payer_name, bills: [], total: 0, proportion: s.proportion }
       }
       grouped[s.payer_id].bills.push(s)
-      grouped[s.payer_id].total += Number(s.bill.amount)
+      grouped[s.payer_id].total += s.amount
     }
     setByPerson(grouped)
     setLoading(false)
@@ -104,13 +104,23 @@ export default function Sugestao() {
               {p.bills.map((s, i) => (
                 <div key={i} style={styles.billRow}>
                   <div style={styles.billInfo}>
-                    <span style={styles.billName}>{s.bill.name}</span>
+                    <span style={styles.billName}>
+                      {s.bill.name}
+                      {s.split && (
+                        <span style={styles.splitBadge}> (divisão)</span>
+                      )}
+                    </span>
                     <span style={styles.billMeta}>
                       vence dia {s.bill.due_day} · pagar com {s.income_name}
                       {s.income_date ? ` (recebido ${formatDate(s.income_date)})` : ''}
                     </span>
+                    {s.split && (
+                      <span style={styles.billMetaSplit}>
+                        Total da conta: {formatCurrency(s.bill.amount)}
+                      </span>
+                    )}
                   </div>
-                  <span style={styles.billAmount}>{formatCurrency(s.bill.amount)}</span>
+                  <span style={styles.billAmount}>{formatCurrency(s.amount)}</span>
                 </div>
               ))}
 
@@ -138,6 +148,8 @@ const styles = {
   billInfo: { flex: 1, display: 'flex', flexDirection: 'column' },
   billName: { fontSize: 14, fontWeight: 500 },
   billMeta: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  billMetaSplit: { fontSize: 12, color: '#9333ea', marginTop: 1 },
+  splitBadge: { fontSize: 11, color: '#9333ea', fontWeight: 600 },
   billAmount: { fontWeight: 700, color: '#374151', minWidth: 90, textAlign: 'right' },
   personTotal: { display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, fontWeight: 600 },
   totalValue: { fontSize: 16, fontWeight: 700 },

@@ -46,72 +46,72 @@ export function calculateSuggestions(incomes, bills) {
   const grandTotal = people.reduce((s, p) => s + p.total, 0)
   if (grandTotal === 0) return []
 
-  // Calcula cota proporcional de cada pessoa
-  for (const p of people) {
-    p.proportion = p.total / grandTotal
-    p.quota = 0 // quanto já foi atribuído a ela
-  }
-
   const totalBills = bills.reduce((s, b) => s + Number(b.amount), 0)
 
-  // Ordena contas por dia de vencimento
-  const sortedBills = [...bills].sort((a, b) => a.due_day - b.due_day)
+  // Cota proporcional de cada pessoa (o quanto deve pagar do total de contas)
+  for (const p of people) {
+    p.proportion = p.total / grandTotal
+    p.remaining = p.proportion * totalBills // quanto ainda falta atribuir a ela
+  }
 
+  const sortedBills = [...bills].sort((a, b) => a.due_day - b.due_day)
   const suggestions = []
 
   for (const bill of sortedBills) {
     const billAmount = Number(bill.amount)
 
-    // Encontra a pessoa que tem renda disponível antes do vencimento
-    // e ainda está dentro da proporção
-    let bestPayer = null
-    let bestIncome = null
-    let bestScore = -Infinity
+    // Identifica quem tem renda disponível antes do vencimento
+    function getBestIncome(person) {
+      const timely = person.incomes
+        .filter(inc => new Date(inc.received_date).getDate() <= bill.due_day)
+        .sort((a, b) => new Date(b.received_date) - new Date(a.received_date))
+      return timely[0] || person.incomes.sort((a, b) => new Date(a.received_date) - new Date(b.received_date))[0]
+    }
 
-    for (const p of people) {
-      // Renda recebida antes ou no dia do vencimento
-      const availableIncomes = p.incomes
-        .filter(inc => {
-          const day = new Date(inc.received_date).getDate()
-          return day <= bill.due_day
+    // Tenta atribuir a conta inteira para quem ainda tem cota suficiente
+    const canCoverFull = people.filter(p => p.remaining >= billAmount - 0.01)
+
+    if (canCoverFull.length > 0) {
+      // Pega quem tem mais cota restante e tem renda antes do vencimento
+      const withTimely = canCoverFull.filter(p => p.incomes.some(inc => new Date(inc.received_date).getDate() <= bill.due_day))
+      const best = (withTimely.length > 0 ? withTimely : canCoverFull)
+        .reduce((a, b) => a.remaining > b.remaining ? a : b)
+
+      best.remaining -= billAmount
+      suggestions.push({
+        bill,
+        payer_id: best.person_id,
+        payer_name: best.person_name,
+        income_name: getBestIncome(best)?.income_source_name || 'Renda',
+        income_date: getBestIncome(best)?.received_date,
+        proportion: (best.proportion * 100).toFixed(1),
+        amount: billAmount,
+        split: false,
+      })
+    } else {
+      // Ninguém cobre sozinho — divide entre todas as pessoas proporcionalmente ao que resta de cota
+      const totalRemaining = people.reduce((s, p) => s + Math.max(p.remaining, 0), 0)
+
+      for (const p of people) {
+        const share = totalRemaining > 0
+          ? (Math.max(p.remaining, 0) / totalRemaining) * billAmount
+          : billAmount / people.length
+
+        if (share < 0.01) continue
+
+        p.remaining -= share
+        suggestions.push({
+          bill,
+          payer_id: p.person_id,
+          payer_name: p.person_name,
+          income_name: getBestIncome(p)?.income_source_name || 'Renda',
+          income_date: getBestIncome(p)?.received_date,
+          proportion: (p.proportion * 100).toFixed(1),
+          amount: share,
+          split: true,
         })
-        .sort((a, b) => new Date(b.received_date) - new Date(a.received_date)) // mais recente primeiro
-
-      if (!availableIncomes.length) continue
-
-      // Score: quanto essa pessoa ainda tem de espaço na proporção dela
-      const expectedQuota = p.proportion * totalBills
-      const remainingQuota = expectedQuota - p.quota
-      const score = remainingQuota
-
-      if (score > bestScore) {
-        bestScore = score
-        bestPayer = p
-        bestIncome = availableIncomes[0]
       }
     }
-
-    // Fallback: se ninguém tem renda antes do vencimento, pega quem tem mais proporção restante
-    if (!bestPayer) {
-      bestPayer = people.reduce((best, p) => {
-        const expectedQuota = p.proportion * totalBills
-        const remaining = expectedQuota - p.quota
-        const bestRemaining = best.proportion * totalBills - best.quota
-        return remaining > bestRemaining ? p : best
-      })
-      bestIncome = bestPayer.incomes.sort((a, b) => new Date(a.received_date) - new Date(b.received_date))[0]
-    }
-
-    bestPayer.quota += billAmount
-
-    suggestions.push({
-      bill,
-      payer_id: bestPayer.person_id,
-      payer_name: bestPayer.person_name,
-      income_name: bestIncome?.income_source_name || 'Renda',
-      income_date: bestIncome?.received_date,
-      proportion: (bestPayer.proportion * 100).toFixed(1),
-    })
   }
 
   return suggestions
