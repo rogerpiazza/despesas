@@ -10,6 +10,7 @@ export default function Rendas() {
   const [sources, setSources] = useState([])
   const [entries, setEntries] = useState([])
   const [form, setForm] = useState({ person_id: '', income_source_id: '', amount: '', received_date: '' })
+  const [editing, setEditing] = useState(null) // {id, amount, received_date}
   const [msg, setMsg] = useState('')
 
   useEffect(() => { loadPeople() }, [])
@@ -47,6 +48,16 @@ export default function Rendas() {
     if (error) return setMsg('Erro: ' + error.message)
     setForm({ income_source_id: '', amount: '', received_date: '' })
     setMsg('Renda lançada!')
+    loadEntries()
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault()
+    await supabase.from('income_entries').update({
+      amount: parseFloat(editing.amount),
+      received_date: editing.received_date,
+    }).eq('id', editing.id)
+    setEditing(null)
     loadEntries()
   }
 
@@ -142,14 +153,29 @@ export default function Rendas() {
         {entries.length === 0 ? (
           <p style={styles.muted}>Nenhuma renda lançada neste mês.</p>
         ) : entries.map(e => (
-          <div key={e.id} style={styles.entryRow}>
-            <div style={styles.entryInfo}>
-              <span style={styles.entryName}>{e.income_sources?.name}</span>
-              <span style={styles.entryPerson}>{e.income_sources?.people?.name}</span>
-            </div>
-            <span style={styles.entryDate}>{formatDate(e.received_date)}</span>
-            <span style={styles.entryAmount}>{formatCurrency(e.amount)}</span>
-            <button onClick={() => deleteEntry(e.id)} style={styles.deleteBtn}>✕</button>
+          <div key={e.id}>
+            {editing?.id === e.id ? (
+              <form onSubmit={saveEdit} style={styles.editRow}>
+                <span style={styles.entryName}>{e.income_sources?.name} — {e.income_sources?.people?.name}</span>
+                <input style={{ ...styles.input, maxWidth: 120 }} type="number" step="0.01"
+                  value={editing.amount} onChange={ev => setEditing(ed => ({ ...ed, amount: ev.target.value }))} />
+                <input style={{ ...styles.input, maxWidth: 140 }} type="date"
+                  value={editing.received_date} onChange={ev => setEditing(ed => ({ ...ed, received_date: ev.target.value }))} />
+                <button style={styles.saveBtn} type="submit">Salvar</button>
+                <button type="button" onClick={() => setEditing(null)} style={styles.cancelBtn}>✕</button>
+              </form>
+            ) : (
+              <div style={styles.entryRow}>
+                <div style={styles.entryInfo}>
+                  <span style={styles.entryName}>{e.income_sources?.name}</span>
+                  <span style={styles.entryPerson}>{e.income_sources?.people?.name}</span>
+                </div>
+                <span style={styles.entryDate}>{formatDate(e.received_date)}</span>
+                <span style={styles.entryAmount}>{formatCurrency(e.amount)}</span>
+                <button onClick={() => setEditing({ id: e.id, amount: e.amount, received_date: e.received_date })} style={styles.editBtn}>✎</button>
+                <button onClick={() => deleteEntry(e.id)} style={styles.deleteBtn}>✕</button>
+              </div>
+            )}
           </div>
         ))}
       </Card>
@@ -169,10 +195,14 @@ const styles = {
   summaryRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 14 },
   summaryVal: { fontWeight: 600, color: '#374151' },
   entryRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #f1f5f9' },
+  editRow: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 0', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap' },
   entryInfo: { flex: 1, display: 'flex', flexDirection: 'column' },
   entryName: { fontSize: 14, fontWeight: 500 },
   entryPerson: { fontSize: 12, color: '#64748b' },
   entryDate: { fontSize: 13, color: '#64748b', minWidth: 70 },
   entryAmount: { fontWeight: 700, color: '#16a34a', minWidth: 90, textAlign: 'right' },
+  editBtn: { background: 'none', border: 'none', color: '#1a56db', cursor: 'pointer', fontSize: 15, padding: '2px 6px' },
+  saveBtn: { background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600 },
+  cancelBtn: { background: '#e2e8f0', color: '#374151', border: 'none', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 13 },
   deleteBtn: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 14, padding: '2px 6px' },
 }

@@ -9,6 +9,7 @@ export default function Extras() {
   const [people, setPeople] = useState([])
   const [extras, setExtras] = useState([])
   const [form, setForm] = useState({ description: '', amount: '', paid_by: '', expense_date: '' })
+  const [editing, setEditing] = useState(null) // {id, description, amount, expense_date, paid_by}
   const [msg, setMsg] = useState('')
 
   useEffect(() => { loadPeople() }, [])
@@ -43,6 +44,18 @@ export default function Extras() {
     if (error) return setMsg('Erro: ' + error.message)
     setForm(f => ({ ...f, description: '', amount: '', expense_date: '' }))
     setMsg('Gasto extra lançado!')
+    loadExtras()
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault()
+    await supabase.from('extra_expenses').update({
+      description: editing.description,
+      amount: parseFloat(editing.amount),
+      expense_date: editing.expense_date,
+      paid_by: editing.paid_by,
+    }).eq('id', editing.id)
+    setEditing(null)
     loadExtras()
   }
 
@@ -117,13 +130,37 @@ export default function Extras() {
         {extras.length === 0 ? (
           <p style={styles.muted}>Nenhum gasto extra neste mês.</p>
         ) : extras.map(e => (
-          <div key={e.id} style={styles.entryRow}>
-            <div style={styles.entryInfo}>
-              <span style={styles.entryName}>{e.description}</span>
-              <span style={styles.entryMeta}>{e.people?.name} · {formatDate(e.expense_date)}</span>
-            </div>
-            <span style={styles.entryAmount}>{formatCurrency(e.amount)}</span>
-            <button onClick={() => deleteExtra(e.id)} style={styles.deleteBtn}>✕</button>
+          <div key={e.id}>
+            {editing?.id === e.id ? (
+              <form onSubmit={saveEdit} style={styles.editBlock}>
+                <input style={styles.input} value={editing.description}
+                  onChange={ev => setEditing(ed => ({ ...ed, description: ev.target.value }))} placeholder="Descrição" autoFocus />
+                <div style={styles.twoCol}>
+                  <input style={styles.input} type="number" step="0.01" value={editing.amount}
+                    onChange={ev => setEditing(ed => ({ ...ed, amount: ev.target.value }))} />
+                  <input style={styles.input} type="date" value={editing.expense_date}
+                    onChange={ev => setEditing(ed => ({ ...ed, expense_date: ev.target.value }))} />
+                </div>
+                <select style={styles.input} value={editing.paid_by}
+                  onChange={ev => setEditing(ed => ({ ...ed, paid_by: ev.target.value }))}>
+                  {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <div style={styles.editActions}>
+                  <button style={styles.saveBtn} type="submit">Salvar</button>
+                  <button type="button" onClick={() => setEditing(null)} style={styles.cancelBtn}>Cancelar</button>
+                </div>
+              </form>
+            ) : (
+              <div style={styles.entryRow}>
+                <div style={styles.entryInfo}>
+                  <span style={styles.entryName}>{e.description}</span>
+                  <span style={styles.entryMeta}>{e.people?.name} · {formatDate(e.expense_date)}</span>
+                </div>
+                <span style={styles.entryAmount}>{formatCurrency(e.amount)}</span>
+                <button onClick={() => setEditing({ id: e.id, description: e.description, amount: e.amount, expense_date: e.expense_date, paid_by: e.paid_by })} style={styles.editBtn}>✎</button>
+                <button onClick={() => deleteExtra(e.id)} style={styles.deleteBtn}>✕</button>
+              </div>
+            )}
           </div>
         ))}
       </Card>
@@ -144,6 +181,11 @@ const styles = {
   summaryRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 14 },
   summaryVal: { fontWeight: 600, color: '#374151' },
   entryRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #f1f5f9' },
+  editBlock: { display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 0', borderBottom: '1px solid #f1f5f9' },
+  editActions: { display: 'flex', gap: 8 },
+  editBtn: { background: 'none', border: 'none', color: '#1a56db', cursor: 'pointer', fontSize: 15, padding: '2px 6px' },
+  saveBtn: { background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, flex: 1 },
+  cancelBtn: { background: '#e2e8f0', color: '#374151', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 13, flex: 1 },
   entryInfo: { flex: 1 },
   entryName: { fontSize: 14, fontWeight: 500, display: 'block' },
   entryMeta: { fontSize: 12, color: '#64748b' },
