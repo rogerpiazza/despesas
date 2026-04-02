@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { currentMonthYear, formatCurrency, formatDate, calculateSettlement } from '../lib/helpers'
+import { currentMonthYear, formatCurrency, formatDate, formatMonthYear, calculateSettlement } from '../lib/helpers'
 import MonthSelector from '../components/MonthSelector'
 import Card, { CardTitle } from '../components/Card'
 
@@ -9,6 +9,7 @@ export default function Encontro() {
   const [settlement, setSettlement] = useState({ people: [], totalPaid: 0, grandTotal: 0, transfer: null })
   const [detail, setDetail] = useState([])
   const [settlementRecord, setSettlementRecord] = useState(null)
+  const [allSettlements, setAllSettlements] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ paid_date: '', notes: '' })
   const [loading, setLoading] = useState(true)
@@ -18,7 +19,7 @@ export default function Encontro() {
   async function load() {
     setLoading(true)
 
-    const [incRes, billPayRes, extRes, settlRes] = await Promise.all([
+    const [incRes, billPayRes, extRes, settlRes, allSettlRes] = await Promise.all([
       supabase.from('income_entries').select('*, people(name)').eq('month_year', month),
       supabase.from('bill_month_entries')
         .select('*, fixed_bills(name), people(name)')
@@ -29,6 +30,9 @@ export default function Encontro() {
         .select('*, from_person:from_person_id(name), to_person:to_person_id(name)')
         .eq('month_year', month)
         .maybeSingle(),
+      supabase.from('settlements')
+        .select('*, from_person:from_person_id(name), to_person:to_person_id(name)')
+        .order('paid_date', { ascending: false }),
     ])
 
     const incomes = (incRes.data || []).map(i => ({ ...i, person_name: i.people?.name }))
@@ -42,6 +46,7 @@ export default function Encontro() {
     const s = calculateSettlement(incomes, billPayments, extras)
     setSettlement(s)
     setSettlementRecord(settlRes.data || null)
+    setAllSettlements(allSettlRes.data || [])
 
     const allPayments = [
       ...billPayments.map(b => ({ type: 'Conta Fixa', description: b.description, amount: Number(b.amount), person_id: b.paid_by, person_name: b.person_name })),
@@ -93,34 +98,35 @@ export default function Encontro() {
         <Card><p style={styles.muted}>Lance rendas e pagamentos para calcular o encontro.</p></Card>
       ) : (
         <>
-          {/* Resultado do cálculo */}
-          {settlement.transfer ? (
-            <Card style={{ background: '#fef3c7', borderLeft: '4px solid #f59e0b' }}>
-              <CardTitle>Resultado</CardTitle>
-              <p style={styles.transferText}>
-                <strong style={{ color: '#dc2626' }}>{settlement.transfer.from}</strong>
-                {' deve transferir '}
-                <strong style={{ color: '#1a56db', fontSize: 18 }}>{formatCurrency(settlement.transfer.amount)}</strong>
-                {' para '}
-                <strong style={{ color: '#16a34a' }}>{settlement.transfer.to}</strong>
-              </p>
-            </Card>
-          ) : (
-            <Card style={{ background: '#d1fae5', borderLeft: '4px solid #16a34a' }}>
-              <p style={{ color: '#065f46', fontWeight: 600, fontSize: 15 }}>Estão quites este mês! ✓</p>
-            </Card>
+          {/* Resultado — só aparece se o encontro ainda não foi feito */}
+          {!settlementRecord && (
+            settlement.transfer ? (
+              <Card style={{ background: '#fef3c7', borderLeft: '4px solid #f59e0b' }}>
+                <CardTitle>Resultado</CardTitle>
+                <p style={styles.transferText}>
+                  <strong style={{ color: '#dc2626' }}>{settlement.transfer.from}</strong>
+                  {' deve transferir '}
+                  <strong style={{ color: '#1a56db', fontSize: 18 }}>{formatCurrency(settlement.transfer.amount)}</strong>
+                  {' para '}
+                  <strong style={{ color: '#16a34a' }}>{settlement.transfer.to}</strong>
+                </p>
+              </Card>
+            ) : (
+              <Card style={{ background: '#d1fae5', borderLeft: '4px solid #16a34a' }}>
+                <p style={{ color: '#065f46', fontWeight: 600, fontSize: 15 }}>Estão quites este mês! ✓</p>
+              </Card>
+            )
           )}
 
-          {/* Registro do encontro */}
+          {/* Registrar ou mostrar que já foi feito */}
           {settlementRecord ? (
             <Card style={{ background: '#d1fae5', borderLeft: '4px solid #16a34a' }}>
               <div style={styles.settlDoneHeader}>
                 <div>
                   <p style={styles.settlDoneTitle}>✓ Encontro realizado</p>
                   <p style={styles.settlDoneMeta}>
-                    {settlementRecord.from_person?.name} transferiu {formatCurrency(settlementRecord.amount)} para {settlementRecord.to_person?.name}
+                    {settlementRecord.from_person?.name} transferiu {formatCurrency(settlementRecord.amount)} para {settlementRecord.to_person?.name} em {formatDate(settlementRecord.paid_date)}
                   </p>
-                  <p style={styles.settlDoneMeta}>em {formatDate(settlementRecord.paid_date)}</p>
                   {settlementRecord.notes && (
                     <p style={styles.settlDoneNotes}>"{settlementRecord.notes}"</p>
                   )}
@@ -180,6 +186,27 @@ export default function Encontro() {
               </div>
             ))}
           </Card>
+
+          {/* Histórico de encontros anteriores */}
+          {allSettlements.length > 0 && (
+            <Card>
+              <CardTitle>Histórico de Encontros</CardTitle>
+              {allSettlements.map(s => (
+                <div key={s.id} style={styles.histRow}>
+                  <div style={styles.histInfo}>
+                    <span style={styles.histDesc}>
+                      {s.from_person?.name} → {s.to_person?.name}
+                    </span>
+                    <span style={styles.histMeta}>
+                      {formatMonthYear(s.month_year)} · {formatDate(s.paid_date)}
+                      {s.notes ? ` · "${s.notes}"` : ''}
+                    </span>
+                  </div>
+                  <span style={styles.histAmount}>{formatCurrency(s.amount)}</span>
+                </div>
+              ))}
+            </Card>
+          )}
 
           {/* Histórico de pagamentos */}
           <Card>
@@ -246,4 +273,9 @@ const styles = {
   detailType: { fontSize: 12, color: '#64748b' },
   detailAmount: { fontWeight: 600, color: '#374151' },
   totalRow: { display: 'flex', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTop: '1px solid #e2e8f0', fontWeight: 600 },
+  histRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #f1f5f9' },
+  histInfo: { flex: 1 },
+  histDesc: { fontSize: 14, fontWeight: 500, display: 'block' },
+  histMeta: { fontSize: 12, color: '#64748b' },
+  histAmount: { fontWeight: 700, color: '#1a56db' },
 }
