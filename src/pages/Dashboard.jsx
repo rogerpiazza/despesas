@@ -7,18 +7,20 @@ import Card, { CardTitle } from '../components/Card'
 export default function Dashboard() {
   const [month, setMonth] = useState(currentMonthYear())
   const [data, setData] = useState({ incomes: [], bills: [], extras: [], billPayments: [] })
+  const [settlementRecord, setSettlementRecord] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { load() }, [month])
 
   async function load() {
     setLoading(true)
-    const [incRes, billPayRes, extRes, billMonthRes, fixedBillRes] = await Promise.all([
+    const [incRes, billPayRes, extRes, billMonthRes, fixedBillRes, settlRes] = await Promise.all([
       supabase.from('income_entries').select('*, people(name), income_sources(name)').eq('month_year', month),
       supabase.from('bill_month_entries').select('*, fixed_bills(name, due_day), people(name)').eq('month_year', month).not('paid_by', 'is', null),
       supabase.from('extra_expenses').select('*, people(name)').eq('month_year', month),
       supabase.from('bill_month_entries').select('bill_id, amount').eq('month_year', month),
       supabase.from('fixed_bills').select('id, estimated_amount').eq('active', true),
+      supabase.from('settlements').select('*, from_person:from_person_id(name), to_person:to_person_id(name)').eq('month_year', month).maybeSingle(),
     ])
 
     const incomes = (incRes.data || []).map(i => ({
@@ -43,6 +45,7 @@ export default function Dashboard() {
     }))
 
     setData({ incomes, billPayments, extras, billMonths })
+    setSettlementRecord(settlRes.data || null)
     setLoading(false)
   }
 
@@ -80,7 +83,11 @@ export default function Dashboard() {
 
       <Card>
         <CardTitle>Encontro Rápido</CardTitle>
-        {settlement.transfer ? (
+        {settlementRecord ? (
+          <p style={{ color: '#16a34a', fontWeight: 600 }}>
+            ✓ Encontro realizado — {settlementRecord.from_person?.name} transferiu {formatCurrency(settlementRecord.amount)} para {settlementRecord.to_person?.name}
+          </p>
+        ) : settlement.transfer ? (
           <div style={styles.transfer}>
             <span style={styles.transferFrom}>{settlement.transfer.from}</span>
             <span style={styles.transferArrow}> deve transferir </span>
