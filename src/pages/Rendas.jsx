@@ -9,7 +9,7 @@ export default function Rendas() {
   const [people, setPeople] = useState([])
   const [sources, setSources] = useState([])
   const [entries, setEntries] = useState([])
-  const [form, setForm] = useState({ income_source_id: '', amount: '', received_date: '' })
+  const [form, setForm] = useState({ person_id: '', income_source_id: '', amount: '', received_date: '' })
   const [msg, setMsg] = useState('')
 
   useEffect(() => { loadPeople() }, [])
@@ -73,19 +73,27 @@ export default function Rendas() {
         <CardTitle>Lançar Renda</CardTitle>
         <form onSubmit={addEntry} style={styles.formGrid}>
           <div style={styles.field}>
+            <label style={styles.label}>Pessoa</label>
+            <select
+              style={styles.input}
+              value={form.person_id}
+              onChange={e => setForm(f => ({ ...f, person_id: e.target.value, income_source_id: '' }))}
+            >
+              <option value="">Selecione a pessoa...</option>
+              {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div style={styles.field}>
             <label style={styles.label}>Fonte de Renda</label>
             <select
               style={styles.input}
               value={form.income_source_id}
               onChange={e => setForm(f => ({ ...f, income_source_id: e.target.value }))}
+              disabled={!form.person_id}
             >
-              <option value="">Selecione...</option>
-              {people.map(person => (
-                <optgroup key={person.id} label={person.name}>
-                  {sources.filter(s => s.people?.id === person.id).map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </optgroup>
+              <option value="">Selecione a fonte...</option>
+              {sources.filter(s => s.people?.id === form.person_id).map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           </div>
