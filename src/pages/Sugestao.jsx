@@ -22,19 +22,28 @@ export default function Sugestao() {
       supabase.from('fixed_bills').select('*').eq('active', true).order('due_day'),
     ])
 
-    // Projeta rendas fixas sem entrada no mês
+    // Projeta rendas fixas (sempre usa estimated_amount + expected_day para sugestão)
     const realEntries = (incRes.data || [])
     const realSourceIds = new Set(realEntries.map(e => e.income_source_id))
     const projected = (fixedSourcesRes.data || [])
       .filter(s => !realSourceIds.has(s.id) && s.estimated_amount)
-      .map(s => ({
-        income_source_id: s.id,
-        person_id: s.person_id,
-        person_name: s.people?.name,
-        income_source_name: s.name,
-        amount: s.estimated_amount,
-        received_date: null,
-      }))
+      .map(s => {
+        // Monta uma data fictícia no mês atual usando expected_day para o algoritmo de timing
+        let received_date = null
+        if (s.expected_day) {
+          const [y, m] = month.split('-')
+          const day = String(s.expected_day).padStart(2, '0')
+          received_date = `${y}-${m}-${day}`
+        }
+        return {
+          income_source_id: s.id,
+          person_id: s.person_id,
+          person_name: s.people?.name,
+          income_source_name: s.name,
+          amount: s.estimated_amount,
+          received_date,
+        }
+      })
 
     const incomes = [
       ...realEntries.map(i => ({ ...i, person_name: i.people?.name, income_source_name: i.income_sources?.name })),

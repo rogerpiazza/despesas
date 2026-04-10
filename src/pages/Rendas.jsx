@@ -9,17 +9,13 @@ export default function Rendas() {
   const [people, setPeople] = useState([])
   const [sources, setSources] = useState([])
   const [entries, setEntries] = useState([])
-  const [localValues, setLocalValues] = useState({})
-  const [saving, setSaving] = useState({})
   const [editing, setEditing] = useState(null)
   const [editingSource, setEditingSource] = useState(null)
   const [msg, setMsg] = useState('')
 
-  // Cadastro de nova fonte
-  const [cadastro, setCadastro] = useState({ person_id: '', newPersonName: '', type: 'fixa', name: '', estimated_amount: '' })
+  const [cadastro, setCadastro] = useState({ person_id: '', newPersonName: '', type: 'fixa', name: '', estimated_amount: '', expected_day: '' })
   const [showNewPerson, setShowNewPerson] = useState(false)
 
-  // Lançamento pontual
   const [form, setForm] = useState({ income_source_id: '', amount: '', received_date: '' })
 
   useEffect(() => { loadAll() }, [])
@@ -40,29 +36,7 @@ export default function Rendas() {
       .select('*, income_sources(name, type, people(name)), people(name)')
       .eq('month_year', month)
       .order('received_date')
-    const entriesData = data || []
-    setEntries(entriesData)
-    initLocalValues(sources, entriesData)
-  }
-
-  function initLocalValues(srcs, ents) {
-    const lv = {}
-    for (const s of srcs.filter(s => s.type === 'fixa')) {
-      const entry = ents.find(e => e.income_source_id === s.id)
-      lv[s.id] = {
-        amount: entry ? String(entry.amount) : (s.estimated_amount ? String(s.estimated_amount) : ''),
-        received_date: entry?.received_date || '',
-      }
-    }
-    setLocalValues(lv)
-  }
-
-  useEffect(() => {
-    if (sources.length) initLocalValues(sources, entries)
-  }, [sources])
-
-  function setLocal(sourceId, field, value) {
-    setLocalValues(lv => ({ ...lv, [sourceId]: { ...lv[sourceId], [field]: value } }))
+    setEntries(data || [])
   }
 
   async function cadastrarFonte(e) {
@@ -83,14 +57,14 @@ export default function Rendas() {
       name: cadastro.name.trim(),
       type: cadastro.type,
       estimated_amount: cadastro.type === 'fixa' && cadastro.estimated_amount ? parseFloat(cadastro.estimated_amount) : null,
+      expected_day: cadastro.expected_day ? parseInt(cadastro.expected_day) : null,
     })
     if (error) return setMsg('Erro: ' + error.message)
 
-    setCadastro({ person_id: '', newPersonName: '', type: 'fixa', name: '', estimated_amount: '' })
+    setCadastro({ person_id: '', newPersonName: '', type: 'fixa', name: '', estimated_amount: '', expected_day: '' })
     setShowNewPerson(false)
     setMsg('Renda cadastrada!')
-    await loadAll()
-    loadEntries()
+    loadAll()
   }
 
   async function saveEditSource(e) {
@@ -100,31 +74,16 @@ export default function Rendas() {
       name: editingSource.name.trim(),
       type: editingSource.type,
       estimated_amount: editingSource.type === 'fixa' && editingSource.estimated_amount ? parseFloat(editingSource.estimated_amount) : null,
+      expected_day: editingSource.expected_day ? parseInt(editingSource.expected_day) : null,
     }).eq('id', editingSource.id)
     setEditingSource(null)
-    await loadAll()
-    loadEntries()
+    loadAll()
   }
 
   async function deleteSource(id) {
     if (!confirm('Remover esta fonte de renda?')) return
     await supabase.from('income_sources').delete().eq('id', id)
-    await loadAll()
-    loadEntries()
-  }
-
-  async function saveFixed(source) {
-    setSaving(s => ({ ...s, [source.id]: true }))
-    const lv = localValues[source.id] || {}
-    const existing = entries.find(e => e.income_source_id === source.id)
-    const payload = { amount: parseFloat(lv.amount) || 0, received_date: lv.received_date || null }
-    if (existing) {
-      await supabase.from('income_entries').update(payload).eq('id', existing.id)
-    } else {
-      await supabase.from('income_entries').insert({ income_source_id: source.id, person_id: source.people?.id || source.person_id, month_year: month, ...payload })
-    }
-    setSaving(s => ({ ...s, [source.id]: false }))
-    loadEntries()
+    loadAll()
   }
 
   async function addEntry(e) {
@@ -160,7 +119,6 @@ export default function Rendas() {
     loadEntries()
   }
 
-  const fixedSources = sources.filter(s => s.type === 'fixa')
   const pontualSources = sources.filter(s => s.type === 'pontual')
   const pontualEntries = entries.filter(e => e.income_sources?.type === 'pontual')
 
@@ -176,7 +134,7 @@ export default function Rendas() {
       <h1 style={styles.title}>Rendas</h1>
       {msg && <div style={styles.msg}>{msg}</div>}
 
-      {/* Cadastro de fonte */}
+      {/* Cadastro */}
       <Card>
         <CardTitle>Cadastrar Renda</CardTitle>
         <form onSubmit={cadastrarFonte} style={styles.formGrid}>
@@ -199,6 +157,7 @@ export default function Rendas() {
               </div>
             )}
           </div>
+
           <div style={styles.twoCol}>
             <div style={styles.field}>
               <label style={styles.label}>Tipo</label>
@@ -214,17 +173,26 @@ export default function Rendas() {
                 value={cadastro.name} onChange={e => setCadastro(c => ({ ...c, name: e.target.value }))} />
             </div>
           </div>
+
           {cadastro.type === 'fixa' && (
-            <div style={styles.field}>
-              <label style={styles.label}>Valor estimado (R$)</label>
-              <input style={styles.input} type="number" step="0.01" placeholder="0,00"
-                value={cadastro.estimated_amount} onChange={e => setCadastro(c => ({ ...c, estimated_amount: e.target.value }))} />
+            <div style={styles.twoCol}>
+              <div style={styles.field}>
+                <label style={styles.label}>Valor estimado (R$)</label>
+                <input style={styles.input} type="number" step="0.01" placeholder="0,00"
+                  value={cadastro.estimated_amount} onChange={e => setCadastro(c => ({ ...c, estimated_amount: e.target.value }))} />
+              </div>
+              <div style={styles.field}>
+                <label style={styles.label}>Dia de recebimento</label>
+                <input style={styles.input} type="number" min="1" max="31" placeholder="Ex: 5"
+                  value={cadastro.expected_day} onChange={e => setCadastro(c => ({ ...c, expected_day: e.target.value }))} />
+              </div>
             </div>
           )}
+
           <button style={styles.btn} type="submit">Cadastrar</button>
         </form>
 
-        {/* Lista de fontes cadastradas */}
+        {/* Lista de fontes */}
         {sources.length > 0 && (
           <div style={{ marginTop: 16, borderTop: '1px solid #e2e8f0', paddingTop: 12 }}>
             <p style={styles.subLabel}>Fontes cadastradas</p>
@@ -242,9 +210,14 @@ export default function Rendas() {
                       </select>
                     </div>
                     {editingSource.type === 'fixa' && (
-                      <input style={styles.input} type="number" step="0.01" placeholder="Valor estimado"
-                        value={editingSource.estimated_amount}
-                        onChange={e => setEditingSource(es => ({ ...es, estimated_amount: e.target.value }))} />
+                      <div style={styles.twoCol}>
+                        <input style={styles.input} type="number" step="0.01" placeholder="Valor estimado"
+                          value={editingSource.estimated_amount}
+                          onChange={e => setEditingSource(es => ({ ...es, estimated_amount: e.target.value }))} />
+                        <input style={styles.input} type="number" min="1" max="31" placeholder="Dia recebimento"
+                          value={editingSource.expected_day}
+                          onChange={e => setEditingSource(es => ({ ...es, expected_day: e.target.value }))} />
+                      </div>
                     )}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button style={{ ...styles.btn, padding: '6px 16px', fontSize: 13 }} type="submit">Salvar</button>
@@ -258,9 +231,10 @@ export default function Rendas() {
                       <span style={styles.sourceMeta}>
                         {s.people?.name} · {s.type === 'fixa' ? '🔁 Fixa' : '⚡ Pontual'}
                         {s.type === 'fixa' && s.estimated_amount ? ` · ${formatCurrency(s.estimated_amount)}` : ''}
+                        {s.type === 'fixa' && s.expected_day ? ` · dia ${s.expected_day}` : ''}
                       </span>
                     </div>
-                    <button onClick={() => setEditingSource({ id: s.id, name: s.name, type: s.type || 'fixa', estimated_amount: s.estimated_amount || '' })} style={styles.editSmall}>✎</button>
+                    <button onClick={() => setEditingSource({ id: s.id, name: s.name, type: s.type || 'fixa', estimated_amount: s.estimated_amount || '', expected_day: s.expected_day || '' })} style={styles.editSmall}>✎</button>
                     <button onClick={() => deleteSource(s.id)} style={styles.deleteSmall}>✕</button>
                   </div>
                 )}
@@ -270,67 +244,29 @@ export default function Rendas() {
         )}
       </Card>
 
-      <MonthSelector value={month} onChange={setMonth} />
-
-      {/* Resumo */}
-      {Object.keys(totalByPerson).length > 0 && (
-        <Card>
-          <CardTitle>Resumo do Mês</CardTitle>
-          {Object.entries(totalByPerson).map(([name, total]) => (
-            <div key={name} style={styles.summaryRow}>
-              <span>{name}</span>
-              <span style={styles.summaryVal}>{formatCurrency(total)}</span>
-            </div>
-          ))}
-          <div style={{ ...styles.summaryRow, borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 4 }}>
-            <span style={{ fontWeight: 700 }}>Total</span>
-            <span style={{ ...styles.summaryVal, color: '#1a56db' }}>{formatCurrency(grandTotal)}</span>
-          </div>
-        </Card>
-      )}
-
-      {/* Rendas Fixas — confirmar mês */}
-      {fixedSources.length > 0 && (
-        <>
-          <p style={styles.sectionLabel}>🔁 Rendas Fixas</p>
-          {fixedSources.map(source => {
-            const lv = localValues[source.id] || {}
-            const saved = !!entries.find(e => e.income_source_id === source.id)
-            return (
-              <Card key={source.id} style={{ paddingBottom: 12 }}>
-                <div style={styles.fixedHeader}>
-                  <span style={styles.fixedName}>{source.name}</span>
-                  <span style={styles.fixedPerson}>{source.people?.name}</span>
-                  {saved && <span style={styles.savedBadge}>✓ confirmado</span>}
-                </div>
-                <div style={styles.twoCol}>
-                  <div style={styles.field}>
-                    <label style={styles.label}>Valor recebido (R$)</label>
-                    <input style={styles.input} type="number" step="0.01"
-                      value={lv.amount ?? ''} onChange={e => setLocal(source.id, 'amount', e.target.value)} />
-                  </div>
-                  <div style={styles.field}>
-                    <label style={styles.label}>Data de recebimento</label>
-                    <input style={styles.input} type="date"
-                      value={lv.received_date || ''} onChange={e => setLocal(source.id, 'received_date', e.target.value)} />
-                  </div>
-                </div>
-                <button style={{ ...styles.btn, marginTop: 10, background: saved ? '#16a34a' : '#1a56db' }}
-                  onClick={() => saveFixed(source)} disabled={saving[source.id]}>
-                  {saving[source.id] ? 'Salvando...' : saved ? '✓ Atualizar' : 'Confirmar recebimento'}
-                </button>
-              </Card>
-            )
-          })}
-        </>
-      )}
-
       {/* Rendas Pontuais */}
       {pontualSources.length > 0 && (
         <>
-          <p style={styles.sectionLabel}>⚡ Rendas Pontuais</p>
+          <MonthSelector value={month} onChange={setMonth} />
+
+          {Object.keys(totalByPerson).length > 0 && (
+            <Card>
+              <CardTitle>Resumo do Mês</CardTitle>
+              {Object.entries(totalByPerson).map(([name, total]) => (
+                <div key={name} style={styles.summaryRow}>
+                  <span>{name}</span>
+                  <span style={styles.summaryVal}>{formatCurrency(total)}</span>
+                </div>
+              ))}
+              <div style={{ ...styles.summaryRow, borderTop: '1px solid #e2e8f0', paddingTop: 8, marginTop: 4 }}>
+                <span style={{ fontWeight: 700 }}>Total</span>
+                <span style={{ ...styles.summaryVal, color: '#1a56db' }}>{formatCurrency(grandTotal)}</span>
+              </div>
+            </Card>
+          )}
+
           <Card>
-            <CardTitle>Lançar Renda Pontual</CardTitle>
+            <CardTitle>⚡ Lançar Renda Pontual</CardTitle>
             <form onSubmit={addEntry} style={styles.formGrid}>
               <div style={styles.field}>
                 <label style={styles.label}>Fonte de Renda</label>
@@ -398,7 +334,6 @@ export default function Rendas() {
 const styles = {
   title: { fontSize: 20, fontWeight: 700, marginBottom: 16 },
   msg: { background: '#d1fae5', color: '#065f46', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 14 },
-  sectionLabel: { fontSize: 13, fontWeight: 700, color: '#374151', margin: '16px 0 8px' },
   formGrid: { display: 'flex', flexDirection: 'column', gap: 10 },
   twoCol: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   field: { display: 'flex', flexDirection: 'column', gap: 4 },
@@ -414,11 +349,6 @@ const styles = {
   sourceMeta: { fontSize: 12, color: '#64748b' },
   editSmall: { background: 'none', border: 'none', color: '#1a56db', cursor: 'pointer', fontSize: 14, padding: '2px 6px' },
   deleteSmall: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 14, padding: '2px 6px' },
-  muted: { color: '#94a3b8', fontSize: 14 },
-  fixedHeader: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' },
-  fixedName: { fontWeight: 700, fontSize: 15 },
-  fixedPerson: { color: '#64748b', fontSize: 13 },
-  savedBadge: { fontSize: 11, color: '#16a34a', fontWeight: 600 },
   summaryRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 14 },
   summaryVal: { fontWeight: 600, color: '#374151' },
   entryRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #f1f5f9' },
