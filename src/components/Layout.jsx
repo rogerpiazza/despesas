@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: '📊' },
@@ -10,11 +11,21 @@ const navItems = [
   { to: '/encontro', label: 'Encontro', icon: '⚖️' },
 ]
 
-export default function Layout({ children }) {
+export default function Layout({ children, session }) {
+  const name = session?.user?.user_metadata?.name || session?.user?.email || ''
+
+  async function handleLogout() {
+    await supabase.auth.signOut()
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <header style={styles.header}>
         <span style={styles.logo}>💸 Despesas</span>
+        <div style={styles.userArea}>
+          <span style={styles.userName}>{name}</span>
+          <button style={styles.logoutBtn} onClick={handleLogout}>Sair</button>
+        </div>
       </header>
 
       <nav style={styles.nav}>
@@ -47,8 +58,21 @@ const styles = {
     fontWeight: 700,
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
   logo: { letterSpacing: 0.5 },
+  userArea: { display: 'flex', alignItems: 'center', gap: 12 },
+  userName: { fontSize: 13, fontWeight: 400, opacity: 0.85 },
+  logoutBtn: {
+    background: 'rgba(255,255,255,0.15)',
+    border: '1px solid rgba(255,255,255,0.3)',
+    color: '#fff',
+    borderRadius: 6,
+    padding: '4px 12px',
+    cursor: 'pointer',
+    fontSize: 13,
+    fontWeight: 500,
+  },
   nav: {
     background: '#fff',
     borderBottom: '1px solid #e2e8f0',
