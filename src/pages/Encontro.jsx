@@ -19,8 +19,9 @@ export default function Encontro() {
   async function load() {
     setLoading(true)
 
-    const [incRes, billPayRes, extRes, settlRes, allSettlRes] = await Promise.all([
+    const [incRes, fixedSourcesRes, billPayRes, extRes, settlRes, allSettlRes] = await Promise.all([
       supabase.from('income_entries').select('*, people(name)').eq('month_year', month),
+      supabase.from('income_sources').select('*, people(name)').eq('type', 'fixa'),
       supabase.from('bill_month_entries')
         .select('*, fixed_bills(name), people(name)')
         .eq('month_year', month)
@@ -35,7 +36,24 @@ export default function Encontro() {
         .order('paid_date', { ascending: false }),
     ])
 
-    const incomes = (incRes.data || []).map(i => ({ ...i, person_name: i.people?.name }))
+    // Projeta rendas fixas sem entrada no mês
+    const realEntries = (incRes.data || [])
+    const realSourceIds = new Set(realEntries.map(e => e.income_source_id))
+    const projected = (fixedSourcesRes.data || [])
+      .filter(s => !realSourceIds.has(s.id) && s.estimated_amount)
+      .map(s => ({
+        income_source_id: s.id,
+        person_id: s.person_id,
+        person_name: s.people?.name,
+        amount: s.estimated_amount,
+        received_date: null,
+      }))
+
+    const incomes = [
+      ...realEntries.map(i => ({ ...i, person_name: i.people?.name })),
+      ...projected,
+    ]
+
     const billPayments = (billPayRes.data || []).map(b => ({
       ...b,
       person_name: b.people?.name,
@@ -98,7 +116,6 @@ export default function Encontro() {
         <Card><p style={styles.muted}>Lance rendas e pagamentos para calcular o encontro.</p></Card>
       ) : (
         <>
-          {/* Resultado — só aparece se o encontro ainda não foi feito */}
           {!settlementRecord && (
             settlement.transfer ? (
               <Card style={{ background: '#fef3c7', borderLeft: '4px solid #f59e0b' }}>
@@ -118,7 +135,6 @@ export default function Encontro() {
             )
           )}
 
-          {/* Registrar ou mostrar que já foi feito */}
           {settlementRecord ? (
             <Card style={{ background: '#d1fae5', borderLeft: '4px solid #16a34a' }}>
               <div style={styles.settlDoneHeader}>
@@ -162,7 +178,6 @@ export default function Encontro() {
             </Card>
           ) : null}
 
-          {/* Detalhamento */}
           <Card>
             <CardTitle>Detalhamento por Pessoa</CardTitle>
             {settlement.people.map((p, idx) => (
@@ -187,7 +202,6 @@ export default function Encontro() {
             ))}
           </Card>
 
-          {/* Histórico de encontros anteriores */}
           {allSettlements.length > 0 && (
             <Card>
               <CardTitle>Histórico de Encontros</CardTitle>
@@ -208,7 +222,6 @@ export default function Encontro() {
             </Card>
           )}
 
-          {/* Histórico de pagamentos */}
           <Card>
             <CardTitle>Histórico de Pagamentos</CardTitle>
             {detail.length === 0 ? (

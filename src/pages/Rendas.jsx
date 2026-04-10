@@ -9,8 +9,10 @@ export default function Rendas() {
   const [people, setPeople] = useState([])
   const [sources, setSources] = useState([])
   const [entries, setEntries] = useState([])
-  const [form, setForm] = useState({ person_id: '', income_source_id: '', amount: '', received_date: '' })
-  const [editing, setEditing] = useState(null) // {id, amount, received_date}
+  const [localValues, setLocalValues] = useState({}) // {sourceId: {amount, received_date}}
+  const [saving, setSaving] = useState({})
+  const [form, setForm] = useState({ income_source_id: '', amount: '', received_date: '' })
+  const [editing, setEditing] = useState(null)
   const [msg, setMsg] = useState('')
 
   useEffect(() => { loadPeople() }, [])
@@ -28,10 +30,62 @@ export default function Rendas() {
   async function loadEntries() {
     const { data } = await supabase
       .from('income_entries')
-      .select('*, income_sources(name, people(name)), people(name)')
+      .select('*, income_sources(name, type, people(name)), people(name)')
       .eq('month_year', month)
       .order('received_date')
-    setEntries(data || [])
+    const entriesData = data || []
+    setEntries(entriesData)
+
+    // Inicializa localValues para fontes fixas
+    const lv = {}
+    for (const s of sources.filter(s => s.type === 'fixa')) {
+      const entry = entriesData.find(e => e.income_source_id === s.id)
+      lv[s.id] = {
+        amount: entry ? String(entry.amount) : (s.estimated_amount ? String(s.estimated_amount) : ''),
+        received_date: entry?.received_date || '',
+      }
+    }
+    setLocalValues(lv)
+  }
+
+  // Reinicializa localValues quando sources carrega
+  useEffect(() => {
+    if (!sources.length || !entries.length) return
+    const lv = {}
+    for (const s of sources.filter(s => s.type === 'fixa')) {
+      const entry = entries.find(e => e.income_source_id === s.id)
+      lv[s.id] = {
+        amount: entry ? String(entry.amount) : (s.estimated_amount ? String(s.estimated_amount) : ''),
+        received_date: entry?.received_date || '',
+      }
+    }
+    setLocalValues(lv)
+  }, [sources, entries])
+
+  function setLocal(sourceId, field, value) {
+    setLocalValues(lv => ({ ...lv, [sourceId]: { ...lv[sourceId], [field]: value } }))
+  }
+
+  async function saveFixed(source) {
+    setSaving(s => ({ ...s, [source.id]: true }))
+    const lv = localValues[source.id] || {}
+    const existing = entries.find(e => e.income_source_id === source.id)
+    const payload = {
+      amount: parseFloat(lv.amount) || 0,
+      received_date: lv.received_date || null,
+    }
+    if (existing) {
+      await supabase.from('income_entries').update(payload).eq('id', existing.id)
+    } else {
+      await supabase.from('income_entries').insert({
+        income_source_id: source.id,
+        person_id: source.person_id,
+        month_year: month,
+        ...payload,
+      })
+    }
+    setSaving(s => ({ ...s, [source.id]: false }))
+    loadEntries()
   }
 
   async function addEntry(e) {
@@ -67,6 +121,10 @@ export default function Rendas() {
     loadEntries()
   }
 
+  const fixedSources = sources.filter(s => s.type === 'fixa')
+  const pontualSources = sources.filter(s => s.type === 'pontual')
+  const pontualEntries = entries.filter(e => e.income_sources?.type === 'pontual')
+
   const totalByPerson = {}
   for (const e of entries) {
     const name = e.income_sources?.people?.name || e.people?.name || '?'
@@ -80,58 +138,7 @@ export default function Rendas() {
       <MonthSelector value={month} onChange={setMonth} />
       {msg && <div style={styles.msg}>{msg}</div>}
 
-      <Card>
-        <CardTitle>Lançar Renda</CardTitle>
-        <form onSubmit={addEntry} style={styles.formGrid}>
-          <div style={styles.field}>
-            <label style={styles.label}>Pessoa</label>
-            <select
-              style={styles.input}
-              value={form.person_id}
-              onChange={e => setForm(f => ({ ...f, person_id: e.target.value, income_source_id: '' }))}
-            >
-              <option value="">Selecione a pessoa...</option>
-              {people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label}>Fonte de Renda</label>
-            <select
-              style={styles.input}
-              value={form.income_source_id}
-              onChange={e => setForm(f => ({ ...f, income_source_id: e.target.value }))}
-              disabled={!form.person_id}
-            >
-              <option value="">Selecione a fonte...</option>
-              {sources.filter(s => s.people?.id === form.person_id).map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label}>Valor (R$)</label>
-            <input
-              style={styles.input}
-              type="number"
-              step="0.01"
-              placeholder="0,00"
-              value={form.amount}
-              onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-            />
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label}>Data de Recebimento</label>
-            <input
-              style={styles.input}
-              type="date"
-              value={form.received_date}
-              onChange={e => setForm(f => ({ ...f, received_date: e.target.value }))}
-            />
-          </div>
-          <button style={styles.btn} type="submit">Lançar</button>
-        </form>
-      </Card>
-
+      {/* Resumo */}
       {Object.keys(totalByPerson).length > 0 && (
         <Card>
           <CardTitle>Resumo do Mês</CardTitle>
@@ -148,37 +155,116 @@ export default function Rendas() {
         </Card>
       )}
 
-      <Card>
-        <CardTitle>Lançamentos</CardTitle>
-        {entries.length === 0 ? (
-          <p style={styles.muted}>Nenhuma renda lançada neste mês.</p>
-        ) : entries.map(e => (
-          <div key={e.id}>
-            {editing?.id === e.id ? (
-              <form onSubmit={saveEdit} style={styles.editRow}>
-                <span style={styles.entryName}>{e.income_sources?.name} — {e.income_sources?.people?.name}</span>
-                <input style={{ ...styles.input, maxWidth: 120 }} type="number" step="0.01"
-                  value={editing.amount} onChange={ev => setEditing(ed => ({ ...ed, amount: ev.target.value }))} />
-                <input style={{ ...styles.input, maxWidth: 140 }} type="date"
-                  value={editing.received_date} onChange={ev => setEditing(ed => ({ ...ed, received_date: ev.target.value }))} />
-                <button style={styles.saveBtn} type="submit">Salvar</button>
-                <button type="button" onClick={() => setEditing(null)} style={styles.cancelBtn}>✕</button>
-              </form>
-            ) : (
-              <div style={styles.entryRow}>
-                <div style={styles.entryInfo}>
-                  <span style={styles.entryName}>{e.income_sources?.name}</span>
-                  <span style={styles.entryPerson}>{e.income_sources?.people?.name}</span>
+      {/* Rendas Fixas */}
+      {fixedSources.length > 0 && (
+        <>
+          <p style={styles.sectionLabel}>🔁 Rendas Fixas</p>
+          {fixedSources.map(source => {
+            const lv = localValues[source.id] || {}
+            const saved = !!entries.find(e => e.income_source_id === source.id)
+            return (
+              <Card key={source.id} style={{ paddingBottom: 12 }}>
+                <div style={styles.fixedHeader}>
+                  <div>
+                    <span style={styles.fixedName}>{source.name}</span>
+                    <span style={styles.fixedPerson}> · {source.people?.name}</span>
+                    {saved && <span style={styles.savedBadge}>✓ confirmado</span>}
+                  </div>
                 </div>
-                <span style={styles.entryDate}>{formatDate(e.received_date)}</span>
-                <span style={styles.entryAmount}>{formatCurrency(e.amount)}</span>
-                <button onClick={() => setEditing({ id: e.id, amount: e.amount, received_date: e.received_date })} style={styles.editBtn}>✎</button>
-                <button onClick={() => deleteEntry(e.id)} style={styles.deleteBtn}>✕</button>
+                <div style={styles.twoCol}>
+                  <div style={styles.field}>
+                    <label style={styles.label}>Valor recebido (R$)</label>
+                    <input style={styles.input} type="number" step="0.01"
+                      value={lv.amount ?? ''}
+                      onChange={e => setLocal(source.id, 'amount', e.target.value)} />
+                  </div>
+                  <div style={styles.field}>
+                    <label style={styles.label}>Data de recebimento</label>
+                    <input style={styles.input} type="date"
+                      value={lv.received_date || ''}
+                      onChange={e => setLocal(source.id, 'received_date', e.target.value)} />
+                  </div>
+                </div>
+                <button
+                  style={{ ...styles.btn, marginTop: 10, background: saved ? '#16a34a' : '#1a56db' }}
+                  onClick={() => saveFixed(source)}
+                  disabled={saving[source.id]}
+                >
+                  {saving[source.id] ? 'Salvando...' : saved ? '✓ Atualizar' : 'Confirmar recebimento'}
+                </button>
+              </Card>
+            )
+          })}
+        </>
+      )}
+
+      {/* Rendas Pontuais */}
+      <p style={styles.sectionLabel}>⚡ Rendas Pontuais</p>
+      <Card>
+        <CardTitle>Lançar Renda Pontual</CardTitle>
+        {pontualSources.length === 0 ? (
+          <p style={styles.muted}>Cadastre fontes de renda do tipo "Pontual" em Pessoas para lançar aqui.</p>
+        ) : (
+          <form onSubmit={addEntry} style={styles.formGrid}>
+            <div style={styles.field}>
+              <label style={styles.label}>Fonte de Renda</label>
+              <select style={styles.input} value={form.income_source_id}
+                onChange={e => setForm(f => ({ ...f, income_source_id: e.target.value }))}>
+                <option value="">Selecione...</option>
+                {pontualSources.map(s => (
+                  <option key={s.id} value={s.id}>{s.name} — {s.people?.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={styles.twoCol}>
+              <div style={styles.field}>
+                <label style={styles.label}>Valor (R$)</label>
+                <input style={styles.input} type="number" step="0.01" placeholder="0,00"
+                  value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
               </div>
-            )}
-          </div>
-        ))}
+              <div style={styles.field}>
+                <label style={styles.label}>Data de recebimento</label>
+                <input style={styles.input} type="date" value={form.received_date}
+                  onChange={e => setForm(f => ({ ...f, received_date: e.target.value }))} />
+              </div>
+            </div>
+            <button style={styles.btn} type="submit">Lançar</button>
+          </form>
+        )}
       </Card>
+
+      {/* Histórico pontuais */}
+      {pontualEntries.length > 0 && (
+        <Card>
+          <CardTitle>Lançamentos Pontuais</CardTitle>
+          {pontualEntries.map(e => (
+            <div key={e.id}>
+              {editing?.id === e.id ? (
+                <form onSubmit={saveEdit} style={styles.editRow}>
+                  <span style={styles.entryName}>{e.income_sources?.name} — {e.income_sources?.people?.name}</span>
+                  <input style={{ ...styles.input, maxWidth: 120 }} type="number" step="0.01"
+                    value={editing.amount} onChange={ev => setEditing(ed => ({ ...ed, amount: ev.target.value }))} />
+                  <input style={{ ...styles.input, maxWidth: 140 }} type="date"
+                    value={editing.received_date} onChange={ev => setEditing(ed => ({ ...ed, received_date: ev.target.value }))} />
+                  <button style={styles.saveBtn} type="submit">Salvar</button>
+                  <button type="button" onClick={() => setEditing(null)} style={styles.cancelBtn}>✕</button>
+                </form>
+              ) : (
+                <div style={styles.entryRow}>
+                  <div style={styles.entryInfo}>
+                    <span style={styles.entryName}>{e.income_sources?.name}</span>
+                    <span style={styles.entryPerson}>{e.income_sources?.people?.name}</span>
+                  </div>
+                  <span style={styles.entryDate}>{formatDate(e.received_date)}</span>
+                  <span style={styles.entryAmount}>{formatCurrency(e.amount)}</span>
+                  <button onClick={() => setEditing({ id: e.id, amount: e.amount, received_date: e.received_date })} style={styles.editBtn}>✎</button>
+                  <button onClick={() => deleteEntry(e.id)} style={styles.deleteBtn}>✕</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </Card>
+      )}
     </div>
   )
 }
@@ -186,12 +272,18 @@ export default function Rendas() {
 const styles = {
   title: { fontSize: 20, fontWeight: 700, marginBottom: 16 },
   msg: { background: '#d1fae5', color: '#065f46', padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 14 },
+  sectionLabel: { fontSize: 13, fontWeight: 700, color: '#374151', margin: '16px 0 8px' },
   formGrid: { display: 'flex', flexDirection: 'column', gap: 10 },
+  twoCol: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   field: { display: 'flex', flexDirection: 'column', gap: 4 },
   label: { fontSize: 12, color: '#64748b', fontWeight: 500 },
   input: { padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none', width: '100%' },
-  btn: { background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontWeight: 600, fontSize: 14, marginTop: 4 },
+  btn: { background: '#1a56db', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', cursor: 'pointer', fontWeight: 600, fontSize: 14, width: '100%' },
   muted: { color: '#94a3b8', fontSize: 14 },
+  fixedHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  fixedName: { fontWeight: 700, fontSize: 15 },
+  fixedPerson: { color: '#64748b', fontSize: 13 },
+  savedBadge: { marginLeft: 8, fontSize: 11, color: '#16a34a', fontWeight: 600 },
   summaryRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 14 },
   summaryVal: { fontWeight: 600, color: '#374151' },
   entryRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #f1f5f9' },

@@ -14,8 +14,9 @@ export default function Dashboard() {
 
   async function load() {
     setLoading(true)
-    const [incRes, billPayRes, extRes, billMonthRes, fixedBillRes, settlRes] = await Promise.all([
-      supabase.from('income_entries').select('*, people(name), income_sources(name)').eq('month_year', month),
+    const [incRes, fixedSourcesRes, billPayRes, extRes, billMonthRes, fixedBillRes, settlRes] = await Promise.all([
+      supabase.from('income_entries').select('*, people(name), income_sources(name, type)').eq('month_year', month),
+      supabase.from('income_sources').select('*, people(name)').eq('type', 'fixa'),
       supabase.from('bill_month_entries').select('*, fixed_bills(name, due_day), people(name)').eq('month_year', month).not('paid_by', 'is', null),
       supabase.from('extra_expenses').select('*, people(name)').eq('month_year', month),
       supabase.from('bill_month_entries').select('bill_id, amount').eq('month_year', month),
@@ -23,21 +24,30 @@ export default function Dashboard() {
       supabase.from('settlements').select('*, from_person:from_person_id(name), to_person:to_person_id(name)').eq('month_year', month).maybeSingle(),
     ])
 
-    const incomes = (incRes.data || []).map(i => ({
-      ...i,
-      person_name: i.people?.name,
-      income_source_name: i.income_sources?.name,
-    }))
-    const billPayments = (billPayRes.data || []).map(b => ({
-      ...b,
-      person_name: b.people?.name,
-    }))
-    const extras = (extRes.data || []).map(e => ({
-      ...e,
-      person_name: e.people?.name,
-    }))
+    // Entradas reais
+    const realEntries = (incRes.data || [])
+    const realSourceIds = new Set(realEntries.map(e => e.income_source_id))
 
-    // Usa valor mensal salvo ou estimado como fallback
+    // Projeta rendas fixas sem entrada no mês
+    const projected = (fixedSourcesRes.data || [])
+      .filter(s => !realSourceIds.has(s.id) && s.estimated_amount)
+      .map(s => ({
+        income_source_id: s.id,
+        person_id: s.person_id,
+        person_name: s.people?.name,
+        income_source_name: s.name,
+        amount: s.estimated_amount,
+        received_date: null,
+      }))
+
+    const incomes = [
+      ...realEntries.map(i => ({ ...i, person_name: i.people?.name, income_source_name: i.income_sources?.name })),
+      ...projected,
+    ]
+
+    const billPayments = (billPayRes.data || []).map(b => ({ ...b, person_name: b.people?.name }))
+    const extras = (extRes.data || []).map(e => ({ ...e, person_name: e.people?.name }))
+
     const billMonthMap = {}
     for (const bm of (billMonthRes.data || [])) billMonthMap[bm.bill_id] = bm.amount
     const billMonths = (fixedBillRes.data || []).map(fb => ({

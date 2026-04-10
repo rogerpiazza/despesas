@@ -15,34 +15,34 @@ export default function Sugestao() {
   async function load() {
     setLoading(true)
 
-    const [incRes, billMonthRes, fixedBillRes] = await Promise.all([
-      supabase
-        .from('income_entries')
-        .select('*, income_sources(name), people(name)')
-        .eq('month_year', month)
-        .order('received_date'),
-      supabase
-        .from('bill_month_entries')
-        .select('*, fixed_bills(name, due_day)')
-        .eq('month_year', month),
-      supabase
-        .from('fixed_bills')
-        .select('*')
-        .eq('active', true)
-        .order('due_day'),
+    const [incRes, fixedSourcesRes, billMonthRes, fixedBillRes] = await Promise.all([
+      supabase.from('income_entries').select('*, income_sources(name), people(name)').eq('month_year', month).order('received_date'),
+      supabase.from('income_sources').select('*, people(name)').eq('type', 'fixa'),
+      supabase.from('bill_month_entries').select('*, fixed_bills(name, due_day)').eq('month_year', month),
+      supabase.from('fixed_bills').select('*').eq('active', true).order('due_day'),
     ])
 
-    const incomes = (incRes.data || []).map(i => ({
-      ...i,
-      person_name: i.people?.name,
-      income_source_name: i.income_sources?.name,
-    }))
+    // Projeta rendas fixas sem entrada no mês
+    const realEntries = (incRes.data || [])
+    const realSourceIds = new Set(realEntries.map(e => e.income_source_id))
+    const projected = (fixedSourcesRes.data || [])
+      .filter(s => !realSourceIds.has(s.id) && s.estimated_amount)
+      .map(s => ({
+        income_source_id: s.id,
+        person_id: s.person_id,
+        person_name: s.people?.name,
+        income_source_name: s.name,
+        amount: s.estimated_amount,
+        received_date: null,
+      }))
 
-    // Usa valor do mês se salvo, senão usa o estimado da conta fixa
+    const incomes = [
+      ...realEntries.map(i => ({ ...i, person_name: i.people?.name, income_source_name: i.income_sources?.name })),
+      ...projected,
+    ]
+
     const billMonthMap = {}
-    for (const bm of (billMonthRes.data || [])) {
-      billMonthMap[bm.bill_id] = bm
-    }
+    for (const bm of (billMonthRes.data || [])) billMonthMap[bm.bill_id] = bm
 
     const bills = (fixedBillRes.data || []).map(fb => {
       const bm = billMonthMap[fb.id]
@@ -58,7 +58,6 @@ export default function Sugestao() {
     const sugg = calculateSuggestions(incomes, bills)
     setSuggestions(sugg)
 
-    // Agrupa por pessoa (usa s.amount que pode ser parcial em splits)
     const grouped = {}
     for (const s of sugg) {
       if (!grouped[s.payer_id]) {
@@ -106,18 +105,14 @@ export default function Sugestao() {
                   <div style={styles.billInfo}>
                     <span style={styles.billName}>
                       {s.bill.name}
-                      {s.split && (
-                        <span style={styles.splitBadge}> (divisão)</span>
-                      )}
+                      {s.split && <span style={styles.splitBadge}> (divisão)</span>}
                     </span>
                     <span style={styles.billMeta}>
                       vence dia {s.bill.due_day} · pagar com {s.income_name}
                       {s.income_date ? ` (recebido ${formatDate(s.income_date)})` : ''}
                     </span>
                     {s.split && (
-                      <span style={styles.billMetaSplit}>
-                        Total da conta: {formatCurrency(s.bill.amount)}
-                      </span>
+                      <span style={styles.billMetaSplit}>Total da conta: {formatCurrency(s.bill.amount)}</span>
                     )}
                   </div>
                   <span style={styles.billAmount}>{formatCurrency(s.amount)}</span>
