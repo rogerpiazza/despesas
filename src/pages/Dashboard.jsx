@@ -32,8 +32,57 @@ export default function Dashboard() {
   const [carryOver, setCarryOver] = useState(false)
   const [editingBalance, setEditingBalance] = useState(null) // null = not editing, string = editing
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => { load() }, [month])
+
+  async function exportCSV() {
+    setExporting(true)
+    const [incRes, fixedSrcRes, billMonthRes, fixedBillRes, extRes] = await Promise.all([
+      supabase.from('income_entries').select('*, income_sources(name, type), people(name)').eq('month_year', month),
+      supabase.from('income_sources').select('*, people(name)').eq('type', 'fixa'),
+      supabase.from('bill_month_entries').select('*, fixed_bills(name, due_day), people(name)').eq('month_year', month),
+      supabase.from('fixed_bills').select('*').eq('active', true),
+      supabase.from('extra_expenses').select('*, people(name)').eq('month_year', month),
+    ])
+
+    const rows = [['Tipo', 'Descrição', 'Pessoa', 'Valor (R$)', 'Data', 'Status']]
+
+    // Rendas recebidas
+    const realSourceIds = new Set((incRes.data || []).map(e => e.income_source_id))
+    for (const e of (incRes.data || [])) {
+      rows.push(['Renda', e.income_sources?.name || '', e.people?.name || '', e.amount, e.received_date || '', 'Recebido'])
+    }
+    // Rendas fixas projetadas
+    for (const s of (fixedSrcRes.data || []).filter(s => !realSourceIds.has(s.id) && s.estimated_amount)) {
+      rows.push(['Renda', s.name, s.people?.name || '', s.estimated_amount, '', 'Projetado'])
+    }
+
+    // Contas Fixas
+    const billMonthMap = {}
+    for (const bm of (billMonthRes.data || [])) billMonthMap[bm.bill_id] = bm
+    for (const fb of (fixedBillRes.data || [])) {
+      const bm = billMonthMap[fb.id]
+      const amount = bm?.amount ?? fb.estimated_amount ?? 0
+      const status = bm?.paid_by ? 'Pago' : 'Não pago'
+      rows.push(['Conta Fixa', fb.name, bm?.people?.name || '', amount, bm?.paid_date || '', status])
+    }
+
+    // Extras
+    for (const e of (extRes.data || [])) {
+      rows.push(['Extra', e.description, e.people?.name || '', e.amount, e.expense_date || '', 'Pago'])
+    }
+
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `despesas-${month}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    setExporting(false)
+  }
 
   async function load() {
     setLoading(true)
@@ -131,11 +180,16 @@ export default function Dashboard() {
       <Card>
         <div style={styles.dreHeader}>
           <CardTitle>Fluxo de Caixa — {formatMonthYear(month)}</CardTitle>
-          {editingBalance === null && (
-            <button style={styles.editBalanceBtn} onClick={() => setEditingBalance(String(openingBalance))}>
-              ✎ saldo inicial
+          <div style={{ display: 'flex', gap: 6 }}>
+            {editingBalance === null && (
+              <button style={styles.editBalanceBtn} onClick={() => setEditingBalance(String(openingBalance))}>
+                ✎ saldo inicial
+              </button>
+            )}
+            <button style={styles.exportBtn} onClick={exportCSV} disabled={exporting}>
+              {exporting ? '...' : '⬇ CSV'}
             </button>
-          )}
+          </div>
         </div>
 
         {editingBalance !== null && (
@@ -240,6 +294,7 @@ const styles = {
   muted: { color: '#94a3b8', fontSize: 14 },
   dreHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
   editBalanceBtn: { background: 'none', border: '1px solid #e2e8f0', borderRadius: 6, color: '#64748b', fontSize: 12, padding: '3px 10px', cursor: 'pointer' },
+  exportBtn: { background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6, color: '#1a56db', fontSize: 12, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 },
   balanceEditBlock: { background: '#f8fafc', borderRadius: 8, padding: '10px 12px', marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 },
   label: { fontSize: 12, color: '#64748b', fontWeight: 500 },
   balanceInput: { flex: 1, padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 14, outline: 'none' },
